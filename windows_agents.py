@@ -15,6 +15,7 @@ import json
 import re
 import os
 import ctypes
+import time
 from datetime import datetime
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Any, Tuple
@@ -1608,7 +1609,6 @@ class LocalPrinterService:
     def _restart_spooler_safe(self):
         """Attempt to restart spooler without throwing"""
         try:
-            import subprocess
             subprocess.run(
                 ["powershell", "-NoProfile", "-Command", "Restart-Service -Name spooler -Force"],
                 timeout=10, capture_output=True
@@ -1640,7 +1640,6 @@ class LocalPrinterService:
                 logger.warning("Spooler is not running; attempting auto-restart...")
                 try:
                     self._restart_spooler_safe()
-                    import time
                     time.sleep(1.5)
                 except Exception as e:
                     logger.error(f"Spooler auto-restart failed: {e}")

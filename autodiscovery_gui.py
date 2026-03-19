@@ -213,7 +213,7 @@ class DiscoveryPanel(ttk.Frame):
 
     def _start_scan(self) -> None:
         """Start a discovery scan in the background"""
-        raw_lines = [ln.strip() for ln in self._subnet_text.get("1.0", "end").splitlines() if ln.strip()]
+        raw_lines = self._get_subnets_from_ui()
         if not raw_lines:
             messagebox.showerror(
                 "No subnets",
