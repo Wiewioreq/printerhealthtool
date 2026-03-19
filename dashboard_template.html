@@ -1,0 +1,367 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Printer Health Dashboard</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"
+          integrity="sha256-oVuCFKEzABMZqmSQ2J0BpEqOpAYNMRtPO5Wx2jT0yCo="
+          crossorigin="anonymous"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: #f0f2f5;
+      color: #333;
+    }
+
+    header {
+      background: linear-gradient(135deg, #1a73e8, #0d47a1);
+      color: #fff;
+      padding: 18px 32px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    header h1 { font-size: 1.5rem; font-weight: 600; }
+    header .timestamp { font-size: 0.85rem; opacity: 0.85; }
+
+    .container { max-width: 1200px; margin: 0 auto; padding: 24px 16px; }
+
+    /* ── KPI tiles ───────────────────────────────────────── */
+    .kpi-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+      gap: 16px;
+      margin-bottom: 24px;
+    }
+    .kpi {
+      background: #fff;
+      border-radius: 10px;
+      padding: 20px 16px;
+      text-align: center;
+      box-shadow: 0 2px 8px rgba(0,0,0,.08);
+    }
+    .kpi .value {
+      font-size: 2.2rem;
+      font-weight: 700;
+      line-height: 1;
+    }
+    .kpi .label { font-size: 0.8rem; color: #666; margin-top: 6px; text-transform: uppercase; }
+    .kpi.online  .value { color: #2e7d32; }
+    .kpi.offline .value { color: #c62828; }
+    .kpi.error   .value { color: #e65100; }
+    .kpi.total   .value { color: #1a73e8; }
+    .kpi.alerts  .value { color: #6a1b9a; }
+
+    /* ── Charts grid ─────────────────────────────────────── */
+    .charts-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(380px, 1fr));
+      gap: 20px;
+      margin-bottom: 24px;
+    }
+    .card {
+      background: #fff;
+      border-radius: 10px;
+      padding: 20px;
+      box-shadow: 0 2px 8px rgba(0,0,0,.08);
+    }
+    .card h2 {
+      font-size: 1rem;
+      font-weight: 600;
+      margin-bottom: 14px;
+      color: #444;
+      border-bottom: 2px solid #e8eaed;
+      padding-bottom: 8px;
+    }
+    .chart-wrap { position: relative; height: 260px; }
+
+    /* ── Toner bars ──────────────────────────────────────── */
+    .toner-list { display: flex; flex-direction: column; gap: 10px; }
+    .toner-row { display: flex; align-items: center; gap: 10px; }
+    .toner-name {
+      width: 130px;
+      font-size: 0.82rem;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      flex-shrink: 0;
+    }
+    .toner-bar-wrap {
+      flex: 1;
+      background: #e8eaed;
+      border-radius: 4px;
+      height: 14px;
+      overflow: hidden;
+    }
+    .toner-bar { height: 100%; border-radius: 4px; transition: width .4s; }
+    .toner-pct { width: 38px; text-align: right; font-size: 0.82rem; color: #555; }
+
+    /* ── Alerts table ────────────────────────────────────── */
+    .alerts-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+    .alerts-table th {
+      background: #f8f9fa;
+      text-align: left;
+      padding: 8px 10px;
+      font-weight: 600;
+      color: #555;
+      border-bottom: 2px solid #e8eaed;
+    }
+    .alerts-table td { padding: 7px 10px; border-bottom: 1px solid #f0f0f0; }
+    .alerts-table tr:hover td { background: #f9fbff; }
+    .badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 12px;
+      font-size: 0.75rem;
+      font-weight: 600;
+      text-transform: uppercase;
+    }
+    .badge-critical { background: #fce4ec; color: #b71c1c; }
+    .badge-error    { background: #fbe9e7; color: #bf360c; }
+    .badge-warning  { background: #fff8e1; color: #f57f17; }
+    .badge-info     { background: #e3f2fd; color: #0d47a1; }
+
+    /* ── Printer status table ────────────────────────────── */
+    .status-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+    .status-table th {
+      background: #f8f9fa;
+      text-align: left;
+      padding: 8px 10px;
+      font-weight: 600;
+      color: #555;
+      border-bottom: 2px solid #e8eaed;
+    }
+    .status-table td { padding: 7px 10px; border-bottom: 1px solid #f0f0f0; }
+    .dot {
+      display: inline-block;
+      width: 10px; height: 10px;
+      border-radius: 50%;
+      margin-right: 5px;
+    }
+    .dot-online  { background: #2e7d32; }
+    .dot-offline { background: #c62828; }
+    .dot-error   { background: #e65100; }
+    .dot-unknown { background: #9e9e9e; }
+
+    footer {
+      text-align: center;
+      padding: 20px;
+      font-size: 0.78rem;
+      color: #aaa;
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>🖨️ Printer Health Dashboard</h1>
+  <span class="timestamp">Generated: {{ generated_at }}</span>
+</header>
+
+<div class="container">
+
+  <!-- ── KPI tiles ────────────────────────────────────────── -->
+  <div class="kpi-grid">
+    <div class="kpi total">
+      <div class="value">{{ stats.total }}</div>
+      <div class="label">Total Printers</div>
+    </div>
+    <div class="kpi online">
+      <div class="value">{{ stats.online }}</div>
+      <div class="label">Online</div>
+    </div>
+    <div class="kpi offline">
+      <div class="value">{{ stats.offline }}</div>
+      <div class="label">Offline</div>
+    </div>
+    <div class="kpi error">
+      <div class="value">{{ stats.error }}</div>
+      <div class="label">Error</div>
+    </div>
+    <div class="kpi alerts">
+      <div class="value">{{ stats.alerts }}</div>
+      <div class="label">Active Alerts</div>
+    </div>
+  </div>
+
+  <!-- ── Charts ────────────────────────────────────────────── -->
+  <div class="charts-grid">
+
+    <!-- Vendor distribution pie chart -->
+    <div class="card">
+      <h2>Manufacturer Distribution</h2>
+      <div class="chart-wrap">
+        <canvas id="vendorChart"></canvas>
+      </div>
+    </div>
+
+    <!-- Status distribution doughnut -->
+    <div class="card">
+      <h2>Status Overview</h2>
+      <div class="chart-wrap">
+        <canvas id="statusChart"></canvas>
+      </div>
+    </div>
+
+    <!-- Toner levels bar chart -->
+    <div class="card" style="grid-column: span 2;">
+      <h2>Toner Levels per Printer</h2>
+      <div class="chart-wrap" style="height: 320px;">
+        <canvas id="tonerChart"></canvas>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ── Per-printer toner bars ───────────────────────────── -->
+  <div class="card" style="margin-bottom: 20px;">
+    <h2>Toner Details</h2>
+    <div class="toner-list">
+      {% for printer in printers %}
+      {% if printer.toners %}
+      <div style="margin-bottom: 12px;">
+        <strong style="font-size: .9rem;">{{ printer.name }} ({{ printer.ip }})</strong>
+        {% for toner in printer.toners %}
+        <div class="toner-row" style="margin-top: 4px;">
+          <span class="toner-name">{{ toner.name | capitalize }}</span>
+          <div class="toner-bar-wrap">
+            <div class="toner-bar"
+                 style="width: {{ toner.level }}%;
+                        background: {{ toner.color }};
+                        {% if toner.level < 10 %}background: #c62828;{% elif toner.level < 20 %}background: #e65100;{% endif %}">
+            </div>
+          </div>
+          <span class="toner-pct">{{ toner.level }}%</span>
+        </div>
+        {% endfor %}
+      </div>
+      {% endif %}
+      {% endfor %}
+    </div>
+  </div>
+
+  <!-- ── Printer status table ─────────────────────────────── -->
+  <div class="card" style="margin-bottom: 20px;">
+    <h2>Printer Status</h2>
+    <table class="status-table">
+      <thead>
+        <tr>
+          <th>Name</th><th>IP</th><th>Manufacturer</th><th>Model</th>
+          <th>Status</th><th>Pages</th><th>Last Check</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for p in printers %}
+        <tr>
+          <td>{{ p.name }}</td>
+          <td>{{ p.ip }}</td>
+          <td>{{ p.manufacturer or '—' }}</td>
+          <td>{{ p.model or '—' }}</td>
+          <td>
+            <span class="dot dot-{{ p.status | lower }}"></span>
+            {{ p.status }}
+          </td>
+          <td>{{ p.page_count or '—' }}</td>
+          <td>{{ p.last_check or '—' }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <!-- ── Alerts ────────────────────────────────────────────── -->
+  <div class="card" style="margin-bottom: 20px;">
+    <h2>Recent Alerts (24 h)</h2>
+    {% if alerts %}
+    <table class="alerts-table">
+      <thead>
+        <tr><th>Time</th><th>Printer</th><th>Type</th><th>Severity</th><th>Message</th></tr>
+      </thead>
+      <tbody>
+        {% for alert in alerts %}
+        <tr>
+          <td>{{ alert.timestamp }}</td>
+          <td>{{ alert.printer_ip }}</td>
+          <td>{{ alert.alert_type }}</td>
+          <td><span class="badge badge-{{ alert.severity }}">{{ alert.severity }}</span></td>
+          <td>{{ alert.message }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p style="color: #888; padding: 12px 0;">No alerts in the last 24 hours. ✅</p>
+    {% endif %}
+  </div>
+
+</div>
+
+<footer>Printer Management Suite — Dashboard generated {{ generated_at }}</footer>
+
+<script>
+// ── Data injected by Python / Jinja2 ─────────────────────────
+const vendorLabels = {{ vendor_labels | tojson }};
+const vendorData   = {{ vendor_data   | tojson }};
+const tonerPrinters = {{ toner_printers | tojson }};
+const tonerDatasets = {{ toner_datasets | tojson }};
+const statusData    = {{ status_data    | tojson }};
+
+// ── Colour palette ────────────────────────────────────────────
+const palette = [
+  '#1a73e8','#34a853','#ea4335','#fbbc04','#ff6d00',
+  '#9c27b0','#00bcd4','#795548','#607d8b','#4caf50',
+];
+
+// ── Vendor pie chart ──────────────────────────────────────────
+new Chart(document.getElementById('vendorChart'), {
+  type: 'pie',
+  data: {
+    labels: vendorLabels,
+    datasets: [{ data: vendorData, backgroundColor: palette }],
+  },
+  options: {
+    plugins: { legend: { position: 'right' } },
+    responsive: true, maintainAspectRatio: false,
+  },
+});
+
+// ── Status doughnut ───────────────────────────────────────────
+new Chart(document.getElementById('statusChart'), {
+  type: 'doughnut',
+  data: {
+    labels: ['Online', 'Offline', 'Error', 'Unknown'],
+    datasets: [{
+      data: statusData,
+      backgroundColor: ['#2e7d32','#c62828','#e65100','#9e9e9e'],
+    }],
+  },
+  options: {
+    plugins: { legend: { position: 'right' } },
+    responsive: true, maintainAspectRatio: false,
+  },
+});
+
+// ── Toner bar chart ───────────────────────────────────────────
+if (tonerPrinters.length > 0) {
+  new Chart(document.getElementById('tonerChart'), {
+    type: 'bar',
+    data: {
+      labels: tonerPrinters,
+      datasets: tonerDatasets,
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      scales: {
+        x: { stacked: false },
+        y: { min: 0, max: 100, title: { display: true, text: 'Level (%)' } },
+      },
+      plugins: { legend: { position: 'top' } },
+    },
+  });
+}
+</script>
+</body>
+</html>
