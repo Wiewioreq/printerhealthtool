@@ -132,46 +132,50 @@ class VendorDetector:
 
     # sysDescr pattern matching: (regex_pattern, manufacturer, confidence, model_group_index_or_None)
     _SYSDESCR_PATTERNS = [
-        # HP
-        (r"(?i)hp\s+laserjet\s+([\w\d\s\-]+?)(?:\s+series)?\s*$", Manufacturer.HP, 0.95, 1),
-        (r"(?i)hp\s+officejet\s+([\w\d\s\-]+?)(?:\s+series)?\s*$", Manufacturer.HP, 0.95, 1),
-        (r"(?i)hp\s+colorjet\s+([\w\d\s\-]+?)(?:\s+series)?\s*$", Manufacturer.HP, 0.95, 1),
+        # HP — specific model families first
+        (r"(?i)hp\s+laserjet\s+([\w\d\s\-\.]+?)(?:\s+series)?\s*$", Manufacturer.HP, 0.95, 1),
+        (r"(?i)hp\s+color\s+laserjet\s+([\w\d\s\-\.]+?)(?:\s+series)?\s*$", Manufacturer.HP, 0.95, 1),
+        (r"(?i)hp\s+officejet\s+([\w\d\s\-\.]+?)(?:\s+series)?\s*$", Manufacturer.HP, 0.95, 1),
+        (r"(?i)hp\s+colorjet\s+([\w\d\s\-\.]+?)(?:\s+series)?\s*$", Manufacturer.HP, 0.95, 1),
         (r"(?i)hewlett.?packard", Manufacturer.HP, 0.90, None),
         (r"(?i)\bhp\b.*(laser|print|jet)", Manufacturer.HP, 0.85, None),
-        # Canon
-        (r"(?i)canon\s+(i-?sensys|imagerunner|lbp|mf)\s+([\w\d\s\-]+?)(?:\s+series)?\s*$",
-         Manufacturer.CANON, 0.95, 2),
+        # Canon — iR-ADV / iR-C, then classical series, then generic
+        (r"(?i)canon\s+i-?r[-\s]?adv\s+([\w\d\-]+)", Manufacturer.CANON, 0.95, 1),
+        (r"(?i)canon\s+i-?r-?c?\s*([\w\d\-]+)", Manufacturer.CANON, 0.95, 1),
+        (r"(?i)canon\s+(i-?sensys|imagerunner|lbp|mf)\s*([\w\d\-]+)", Manufacturer.CANON, 0.95, 2),
         (r"(?i)canon", Manufacturer.CANON, 0.90, None),
         # Xerox
-        (r"(?i)xerox\s+(workcentre|phaser|versalink|altalink)\s+([\w\d\-]+)",
+        (r"(?i)xerox\s+(workcentre|phaser|versalink|altalink|apeosport)\s+([\w\d\-]+)",
          Manufacturer.XEROX, 0.95, 2),
+        (r"(?i)fuji\s+xerox", Manufacturer.XEROX, 0.92, None),
         (r"(?i)xerox", Manufacturer.XEROX, 0.90, None),
         # Konica Minolta
-        (r"(?i)konica\s*minolta\s+(bizhub|accurio|magicolor)\s*([\w\d\s\-]+?)\s*$",
+        (r"(?i)konica\s*minolta\s+(bizhub|accurio|magicolor)\s*([\w\d\-]+)",
          Manufacturer.KONICA_MINOLTA, 0.95, 2),
         (r"(?i)konica.?minolta", Manufacturer.KONICA_MINOLTA, 0.90, None),
         (r"(?i)bizhub", Manufacturer.KONICA_MINOLTA, 0.80, None),
         # Brother
-        (r"(?i)brother\s+(hl|mfc|dcp|pt)\s*[-]?([\w\d\s\-]+?)\s*$", Manufacturer.BROTHER, 0.95, 2),
+        (r"(?i)brother\s+(hl|mfc|dcp|pt)\s*[-]?([\w\d]+)", Manufacturer.BROTHER, 0.95, 2),
         (r"(?i)brother", Manufacturer.BROTHER, 0.90, None),
         # Epson
-        (r"(?i)epson\s+(workforce|expression|ecotank|stylus)\s+([\w\d\s\-]+?)\s*$",
+        (r"(?i)epson\s+(workforce|expression|ecotank|stylus|al|l)\s+([\w\d\-]+)",
          Manufacturer.EPSON, 0.95, 2),
+        (r"(?i)epson\s+(al|et|wf|sc|lq|fx)-?([\w\d]+)", Manufacturer.EPSON, 0.95, 2),
         (r"(?i)seiko\s+epson", Manufacturer.EPSON, 0.95, None),
         (r"(?i)epson", Manufacturer.EPSON, 0.90, None),
         # Lexmark
-        (r"(?i)lexmark\s+([\w\d\s\-]+?)\s*$", Manufacturer.LEXMARK, 0.95, 1),
+        (r"(?i)lexmark\s+([\w\d\-]+)", Manufacturer.LEXMARK, 0.95, 1),
         (r"(?i)lexmark", Manufacturer.LEXMARK, 0.90, None),
-        # Ricoh
-        (r"(?i)ricoh\s+(aficio|mp|sp|im)\s*([\w\d\s\-]+?)\s*$", Manufacturer.RICOH, 0.95, 2),
+        # Ricoh — allow version/extra text after model number
+        (r"(?i)ricoh\s+(aficio|mp|sp|im)\s*([\w\d\-]+)", Manufacturer.RICOH, 0.95, 2),
         (r"(?i)ricoh", Manufacturer.RICOH, 0.90, None),
         (r"(?i)aficio", Manufacturer.RICOH, 0.80, None),
         # Kyocera
-        (r"(?i)kyocera\s+(ecosys|taskalfa|fs)\s*([\w\d\s\-]+?)\s*$", Manufacturer.KYOCERA, 0.95, 2),
+        (r"(?i)kyocera\s+(ecosys|taskalfa|fs)\s*([\w\d\-]+)", Manufacturer.KYOCERA, 0.95, 2),
         (r"(?i)kyocera", Manufacturer.KYOCERA, 0.90, None),
         (r"(?i)taskalfa", Manufacturer.KYOCERA, 0.80, None),
         # Samsung
-        (r"(?i)samsung\s+(m|sl|clx|scx|ml)\s*[-]?([\w\d\s\-]+?)\s*$", Manufacturer.SAMSUNG, 0.95, 2),
+        (r"(?i)samsung\s+(m|sl|clx|scx|ml)\s*[-]?([\w\d]+)", Manufacturer.SAMSUNG, 0.95, 2),
         (r"(?i)samsung", Manufacturer.SAMSUNG, 0.90, None),
     ]
 

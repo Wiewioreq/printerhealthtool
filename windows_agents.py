@@ -1604,6 +1604,17 @@ class LocalPrinterService:
         """Cleanup"""
         self._executor.shutdown(wait=False)
         logger.info("LocalPrinterService shutdown")
+
+    def _restart_spooler_safe(self):
+        """Attempt to restart spooler without throwing"""
+        try:
+            import subprocess
+            subprocess.run(
+                ["powershell", "-NoProfile", "-Command", "Restart-Service -Name spooler -Force"],
+                timeout=10, capture_output=True
+            )
+        except Exception as e:
+            logger.error(f"Spooler restart failed: {e}")
     
     def get_diagnostics(self) -> DiagnosticsResult:
         """Get system diagnostics"""
@@ -1622,6 +1633,21 @@ class LocalPrinterService:
         Get all local printers using best available method.
         Falls back automatically: WMI -> Win32 -> PowerShell
         """
+        # Preflight: check if Spooler is running
+        try:
+            spooler = self.get_spooler_status()
+            if not spooler.is_running:
+                logger.warning("Spooler is not running; attempting auto-restart...")
+                try:
+                    self._restart_spooler_safe()
+                    import time
+                    time.sleep(1.5)
+                except Exception as e:
+                    logger.error(f"Spooler auto-restart failed: {e}")
+                    return []  # Return empty - UI should show banner
+        except Exception:
+            pass  # Spooler check itself failed, continue with best effort
+
         printers = {}
         data_source = "unknown"
         

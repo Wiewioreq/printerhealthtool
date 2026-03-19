@@ -216,6 +216,17 @@ class SubnetDetector:
         Returns a CIDR string or None if unparseable.
         """
         subnet_str = subnet_str.strip()
+
+        # Strict allowlist: only digits, dots, slashes allowed
+        if not re.match(r'^[0-9./]+$', subnet_str):
+            logger.warning("Rejecting invalid subnet input (illegal chars): '%s'", subnet_str)
+            return None
+
+        # Reject if too many dots, slashes, or other anomalies
+        if subnet_str.count('.') > 3 or subnet_str.count('/') > 1:
+            logger.warning("Rejecting malformed subnet: '%s'", subnet_str)
+            return None
+
         try:
             # CIDR notation
             return str(ipaddress.IPv4Network(subnet_str, strict=False))
@@ -329,6 +340,13 @@ class NetworkScanner:
     def cancel(self) -> None:
         """Signal the scanner to stop after the current batch"""
         self._cancel_event.set()
+
+    def stop(self) -> None:
+        """Alias for cancel(); also shuts down any persistent executor"""
+        self._cancel_event.set()
+        if hasattr(self, '_executor') and self._executor:
+            self._executor.shutdown(wait=False)
+            logger.info("NetworkScanner executor shutdown")
 
     def reset(self) -> None:
         """Reset the cancel flag so the scanner can be reused"""

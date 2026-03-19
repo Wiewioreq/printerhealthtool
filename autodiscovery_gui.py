@@ -213,8 +213,8 @@ class DiscoveryPanel(ttk.Frame):
 
     def _start_scan(self) -> None:
         """Start a discovery scan in the background"""
-        subnets = self._get_subnets_from_ui()
-        if not subnets:
+        raw_lines = [ln.strip() for ln in self._subnet_text.get("1.0", "end").splitlines() if ln.strip()]
+        if not raw_lines:
             messagebox.showerror(
                 "No subnets",
                 "Enter at least one subnet to scan, or click Auto-detect.",
@@ -223,7 +223,7 @@ class DiscoveryPanel(ttk.Frame):
             return
 
         try:
-            from autodiscovery import AutoDiscoveryService  # type: ignore
+            from autodiscovery import AutoDiscoveryService, SubnetDetector  # type: ignore
         except ImportError:
             messagebox.showerror(
                 "Module missing",
@@ -231,6 +231,27 @@ class DiscoveryPanel(ttk.Frame):
                 parent=self,
             )
             return
+
+        # Validate each subnet, collect rejected entries
+        rejected = []
+        valid_subnets = []
+        for line in raw_lines:
+            parsed = SubnetDetector.parse_subnet_input(line)
+            if parsed:
+                valid_subnets.append(parsed)
+            else:
+                rejected.append(line)
+
+        if rejected:
+            self._status_label.config(
+                text=f"⚠️ Rejected invalid subnets: {', '.join(rejected)}"
+            )
+
+        if not valid_subnets:
+            messagebox.showerror("Error", "No valid subnets to scan", parent=self)
+            return
+
+        subnets = valid_subnets
 
         self._results.clear()
         for item in self._tree.get_children():
