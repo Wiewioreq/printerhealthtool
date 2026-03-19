@@ -630,6 +630,31 @@ class DatabaseManager:
         ))
         conn.commit()
         conn.close()
+
+    def save_discovered_printers_batch(self, printers: List[Dict[str, Any]]):
+        """Batch insert discovered printers for better performance"""
+        if not printers:
+            return
+
+        conn = sqlite3.connect(self.db_file)
+        cursor = conn.cursor()
+        try:
+            cursor.executemany('''
+                INSERT OR REPLACE INTO discovered_printers
+                (ip, name, manufacturer, model, sys_descr, auto_added, timestamp)
+                VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            ''', [
+                (p.get('ip'), p.get('name'), p.get('manufacturer'),
+                 p.get('model_hint'), p.get('sys_descr'), False)
+                for p in printers
+            ])
+            conn.commit()
+            logger.info(f"Batch saved {len(printers)} discovered printers")
+        except Exception as e:
+            logger.error(f"Batch save error: {e}")
+            conn.rollback()
+        finally:
+            conn.close()
     
     def get_discovered_printers(self) -> List[Dict]:
         conn = sqlite3.connect(self.db_file)
@@ -799,6 +824,13 @@ class ConfigManager:
                                 if k not in config.get(key, {}):
                                     config.setdefault(key, {})[k] = v
                     logger.info(f"Configuration loaded from {config_file}")
+                    # Warn about plaintext credentials
+                    if (config.get('email', {}).get('password') and
+                            config['email']['password'] != 'app-password'):
+                        logger.warning(
+                            "⚠️ Email password stored in plaintext in config.yaml. "
+                            "Consider using environment variable PRINTER_SUITE_EMAIL_PWD instead."
+                        )
                     return config
             except Exception as e:
                 logger.error(f"Error loading config: {e}")
@@ -860,7 +892,14 @@ class ConfigManager:
             'local_printers': {
                 'enabled': True,
                 'monitor_interval_minutes': 5
-            }
+            },
+            'timeouts': {
+                'snmp': 3,
+                'ping': 2,
+                'port_scan': 2,
+                'powershell': 20,
+                'discovery_per_host': 5,
+            },
         }
 
 
@@ -960,11 +999,20 @@ class AlertDispatcher:
         cfg = self.config.get('email', {})
         if not cfg.get('enabled'):
             return False
-        
+
+        # Support ENV variable for password (safer than plaintext config)
+        password = os.environ.get('PRINTER_SUITE_EMAIL_PWD', cfg.get('password', ''))
+        if not password:
+            logger.error(
+                "Email password not configured "
+                "(set PRINTER_SUITE_EMAIL_PWD env var or config.yaml)"
+            )
+            return False
+
         try:
             server = smtplib.SMTP(cfg['smtp_server'], cfg.get('smtp_port', 587))
             server.starttls()
-            server.login(cfg['sender'], cfg['password'])
+            server.login(cfg['sender'], password)
             
             msg = MIMEMultipart()
             msg['From'] = cfg['sender']
@@ -1824,19 +1872,47 @@ class DashboardGenerator:
             return self._basic_html(data)
     
     def _basic_html(self, data: Dict) -> str:
+        """Minimal fallback HTML - no Jinja, no Chart.js, just static text"""
         printers = data.get('printers', [])
-        return f"""
-        <html>
-        <head><title>Printer Dashboard</title></head>
-        <body style="font-family: sans-serif; padding: 20px;">
-            <h1>🖨️ Printer Dashboard</h1>
-            <p>Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</p>
-            <p>Total: {len(printers)} | Online: {sum(1 for p in printers if p.get('status') == 'ONLINE')} | Offline: {sum(1 for p in printers if p.get('status') == 'OFFLINE')}</p>
-            <h2>Printers</h2>
-            {''.join(f"<p>{p.get('name', p.get('ip'))} - {p.get('status')} - {p.get('manufacturer', 'Unknown')}</p>" for p in printers) or '<p>No printers</p>'}
-        </body>
-        </html>
-        """
+        timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        online = sum(1 for p in printers if p.get('status') == 'ONLINE')
+        offline = sum(1 for p in printers if p.get('status') == 'OFFLINE')
+
+        rows = ""
+        for p in printers:
+            name = p.get('name', p.get('ip', 'N/A'))
+            status = p.get('status', 'UNKNOWN')
+            mfr = p.get('manufacturer', 'Unknown')
+            toner = p.get('toner_level', 'N/A')
+            color = '#48bb78' if status == 'ONLINE' else '#f56565' if status == 'OFFLINE' else '#ed8936'
+            rows += (
+                f'<tr><td>{name}</td>'
+                f'<td style="color:{color};font-weight:bold">{status}</td>'
+                f'<td>{mfr}</td>'
+                f'<td>{toner}%</td></tr>'
+            )
+
+        return f"""<!DOCTYPE html>
+<html>
+<head><meta charset="UTF-8"><title>Printer Dashboard</title>
+<style>body{{font-family:sans-serif;padding:20px;background:#f5f5f5}}
+table{{border-collapse:collapse;width:100%}}th,td{{padding:8px 12px;border:1px solid #ddd;text-align:left}}
+th{{background:#667eea;color:white}}.stats{{display:flex;gap:20px;margin:20px 0}}
+.stat{{background:white;padding:15px;border-radius:8px;box-shadow:0 2px 4px rgba(0,0,0,.1)}}</style>
+</head>
+<body>
+<h1>&#x1F5A8; Printer Dashboard (Basic Mode)</h1>
+<p>Generated: {timestamp} | Jinja2 not available</p>
+<div class="stats">
+<div class="stat"><strong>Total:</strong> {len(printers)}</div>
+<div class="stat" style="color:#48bb78"><strong>Online:</strong> {online}</div>
+<div class="stat" style="color:#f56565"><strong>Offline:</strong> {offline}</div>
+</div>
+<table><tr><th>Name</th><th>Status</th><th>Manufacturer</th><th>Toner</th></tr>
+{rows or '<tr><td colspan="4" style="text-align:center">No printers monitored</td></tr>'}
+</table>
+<p style="margin-top:20px;color:#666;font-size:0.8em">Printer Management Suite v6.1 &bull; Basic HTML (install jinja2 for full dashboard)</p>
+</body></html>"""
     
     def save(self, data: Dict[str, Any], filepath: str = None) -> str:
         html = self.generate(data)
@@ -3102,6 +3178,21 @@ class PrinterManagementApp:
                 self.snmp_engine = create_snmp_engine(self.config)
             except Exception as e:
                 logger.error(f"SNMP engine init failed: {e}")
+
+        # After SNMP engine init, check if tools are actually usable
+        self.snmp_available = False
+        if SNMP_ENGINE_AVAILABLE:
+            try:
+                from snmp_engine import SNMPHelper
+                self.snmp_available = SNMPHelper.is_snmp_available()
+            except Exception:
+                pass
+
+        if not self.snmp_available:
+            logger.warning("SNMP tools (snmpget/snmpwalk) not found in PATH. "
+                           "Discovery will use port-scan & ping only.")
+            # Auto-configure discovery to not use SNMP probe
+            self.config.setdefault('discovery', {})['snmp_probe'] = False
         
         # Windows Local Printer Service
         self.local_service = None
@@ -3142,7 +3233,7 @@ class PrinterManagementApp:
         logger.info(f"Platform: {platform.system()}")
         logger.info(f"Python: {sys.version.split()[0]}")
         logger.info(f"Network printers configured: {len(self.config.get('printers', []))}")
-        
+
         logger.info("Modules status:")
         logger.info(f"  OID Registry: {OID_REGISTRY_AVAILABLE}")
         logger.info(f"  SNMP Engine: {SNMP_ENGINE_AVAILABLE}")
@@ -3153,6 +3244,11 @@ class PrinterManagementApp:
         logger.info(f"  Jinja2: {JINJA2_AVAILABLE}")
         logger.info(f"  APScheduler: {APSCHEDULER_AVAILABLE}")
         logger.info(f"  Requests: {REQUESTS_AVAILABLE}")
+
+        if self.snmp_available:
+            logger.info(f"  SNMP Tools: Available")
+        else:
+            logger.warning(f"  SNMP Tools: NOT FOUND - install Net-SNMP and add to PATH")
     
     def _create_menu(self):
         menubar = tk.Menu(self.root)
@@ -3226,19 +3322,33 @@ class PrinterManagementApp:
     def _create_status_bar(self):
         status_frame = ttk.Frame(self.root)
         status_frame.pack(fill=tk.X, padx=10, pady=5)
-        
+
         sched = "ON" if self.config.get('scheduler', {}).get('enabled') else "OFF"
         net_printers = len(self.config.get('printers', []))
-        
+
         local_count = 0
         if self.local_service:
             try:
                 local_count = len(self.local_service.get_all_printers())
-            except:
+            except Exception:
                 pass
-        
+
         status = f"Scheduler: {sched} | Network: {net_printers} | Local: {local_count} | Platform: {platform.system()}"
-        
+
+        # Check spooler status
+        self.spooler_ok = True
+        if IS_WINDOWS:
+            try:
+                if self.local_service:
+                    spooler = self.local_service.get_spooler_status()
+                    self.spooler_ok = spooler.is_running
+            except Exception:
+                self.spooler_ok = False
+
+        # Collect warnings
+        warnings = []
+
+        # Missing modules
         modules = []
         if not WINDOWS_AGENTS_AVAILABLE:
             modules.append("windows_agents")
@@ -3246,12 +3356,34 @@ class PrinterManagementApp:
             modules.append("snmp_engine")
         if not OID_REGISTRY_AVAILABLE:
             modules.append("oid_registry")
-        
         if modules:
-            status += f" | Missing: {', '.join(modules)}"
-        
+            warnings.append(f"Missing: {', '.join(modules)}")
+
+        # SNMP tools
+        if not getattr(self, 'snmp_available', True):
+            warnings.append("SNMP tools not in PATH")
+
+        # Spooler
+        if IS_WINDOWS and not self.spooler_ok:
+            warnings.append("Spooler stopped")
+
+        if warnings:
+            status += f" | ⚠️ {'; '.join(warnings)}"
+
         self.status_label = ttk.Label(status_frame, text=status, relief=tk.SUNKEN)
         self.status_label.pack(fill=tk.X)
+
+        # If there are warnings, also show a prominent warning bar
+        if warnings:
+            warn_frame = ttk.Frame(self.root)
+            warn_frame.pack(fill=tk.X, padx=10)
+            warn_label = ttk.Label(
+                warn_frame,
+                text=f"⚠️ Limited mode: {'; '.join(warnings)}",
+                foreground="red",
+                font=("Arial", 9, "bold"),
+            )
+            warn_label.pack(fill=tk.X)
     
     def _on_settings_saved(self):
         """Reload after settings change"""
@@ -3380,19 +3512,31 @@ Sharp, OKI, Toshiba, Dell, Fuji Xerox
         logger.info("Shutting down...")
         event_bus.stop()
         self.scheduler.stop()
-        
+
+        # Shutdown SNMP engine executor
         if self.snmp_engine:
             try:
                 self.snmp_engine.shutdown()
-            except:
-                pass
-        
+                logger.info("SNMP engine shutdown complete")
+            except Exception as e:
+                logger.error(f"SNMP shutdown error: {e}")
+
+        # Shutdown local printer service
         if self.local_service:
             try:
                 self.local_service.shutdown()
-            except:
-                pass
-        
+                logger.info("Local printer service shutdown complete")
+            except Exception as e:
+                logger.error(f"Local service shutdown error: {e}")
+
+        # Shutdown autodiscovery if running
+        if hasattr(self, 'autodiscovery_service') and self.autodiscovery_service:
+            try:
+                self.autodiscovery_service.stop_discovery()
+                logger.info("Autodiscovery service shutdown complete")
+            except Exception as e:
+                logger.error(f"Autodiscovery shutdown error: {e}")
+
         self.root.destroy()
 
 

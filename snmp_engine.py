@@ -722,11 +722,17 @@ class AsyncSNMPEngine:
         
         duration_ms = int((datetime.now() - start_time).total_seconds() * 1000)
         
+        # Use a more informative check_method when SNMP tools are missing vs. simply unavailable
+        if not self._snmp_available:
+            method = "ping_fallback (SNMP unavailable)"
+        else:
+            method = "ping_fallback"
+
         return PrinterCheckResult(
             ip=ip,
             name=name,
             status=status,
-            check_method="ping",
+            check_method=method,
             check_duration_ms=duration_ms,
             error_message=error_msg or ("SNMP unavailable" if status == PrinterStatus.ONLINE else None)
         )
