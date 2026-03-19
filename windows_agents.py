@@ -1180,7 +1180,16 @@ class WMIAgent:
                 return None
         
         return self._local.wmi
-    
+
+    def _safe_int(self, value, default=0) -> int:
+        """Safely convert WMI value to int (WMI sometimes returns strings)"""
+        if value is None:
+            return default
+        try:
+            return int(value)
+        except (ValueError, TypeError):
+            return default
+
     def get_printers(self) -> List[LocalPrinterInfo]:
         """Get all printers via WMI"""
         if not self.available:
@@ -1196,63 +1205,70 @@ class WMIAgent:
             logger.debug("WMI: Querying Win32_Printer")
             
             for p in c.Win32_Printer():
-                # Parse status
-                status, _ = WindowsStatusParser.parse_printer_status(p.PrinterStatus or 0)
-                
-                # Determine printer type
-                port = p.PortName or ""
-                if "USB" in port.upper():
-                    ptype = PrinterType.USB
-                elif "LPT" in port.upper():
-                    ptype = PrinterType.LOCAL
-                elif p.Network:
-                    ptype = PrinterType.NETWORK
-                elif p.Local:
-                    if any(x in (p.DriverName or "").upper() for x in ["XPS", "PDF", "ONENOTE", "FAX"]):
-                        ptype = PrinterType.VIRTUAL
-                    else:
+                try:
+                    # Parse status
+                    status, _ = WindowsStatusParser.parse_printer_status(
+                        self._safe_int(getattr(p, 'PrinterStatus', 0))
+                    )
+
+                    # Determine printer type
+                    port = getattr(p, 'PortName', "") or ""
+                    if "USB" in port.upper():
+                        ptype = PrinterType.USB
+                    elif "LPT" in port.upper():
                         ptype = PrinterType.LOCAL
-                else:
-                    ptype = PrinterType.UNKNOWN
-                
-                # Parse manufacturer from driver
-                manufacturer = None
-                driver = p.DriverName or ""
-                for mfr in ["HP", "Canon", "Epson", "Brother", "Xerox", "Lexmark", 
-                           "Samsung", "Ricoh", "Kyocera", "Konica", "Sharp", "OKI"]:
-                    if mfr.lower() in driver.lower():
-                        manufacturer = mfr
-                        break
-                
-                printer = LocalPrinterInfo(
-                    name=p.Name,
-                    port_name=p.PortName or "",
-                    driver_name=p.DriverName or "",
-                    printer_type=ptype,
-                    status=status,
-                    status_code=p.PrinterStatus or 0,
-                    is_default=bool(p.Default),
-                    is_shared=bool(p.Shared),
-                    share_name=p.ShareName,
-                    location=p.Location,
-                    comment=p.Comment,
-                    device_id=p.DeviceID,
-                    manufacturer=manufacturer,
-                    is_color=bool(p.CapabilityDescriptions and 
-                                 "Color" in str(p.CapabilityDescriptions)),
-                    jobs_count=p.Jobs or 0,
-                    data_source="wmi",
-                    raw_wmi_data={
-                        'Attributes': p.Attributes,
-                        'Capabilities': p.Capabilities,
-                        'DetectedErrorState': p.DetectedErrorState,
-                        'ExtendedPrinterStatus': p.ExtendedPrinterStatus,
-                        'HorizontalResolution': p.HorizontalResolution,
-                        'VerticalResolution': p.VerticalResolution,
-                    }
-                )
-                
-                printers.append(printer)
+                    elif getattr(p, 'Network', False):
+                        ptype = PrinterType.NETWORK
+                    elif getattr(p, 'Local', False):
+                        if any(x in (getattr(p, 'DriverName', "") or "").upper()
+                               for x in ["XPS", "PDF", "ONENOTE", "FAX"]):
+                            ptype = PrinterType.VIRTUAL
+                        else:
+                            ptype = PrinterType.LOCAL
+                    else:
+                        ptype = PrinterType.UNKNOWN
+
+                    # Parse manufacturer from driver
+                    manufacturer = None
+                    driver = getattr(p, 'DriverName', "") or ""
+                    for mfr in ["HP", "Canon", "Epson", "Brother", "Xerox", "Lexmark",
+                                "Samsung", "Ricoh", "Kyocera", "Konica", "Sharp", "OKI"]:
+                        if mfr.lower() in driver.lower():
+                            manufacturer = mfr
+                            break
+
+                    cap_desc = getattr(p, 'CapabilityDescriptions', None)
+                    printer = LocalPrinterInfo(
+                        name=getattr(p, 'Name', ""),
+                        port_name=getattr(p, 'PortName', "") or "",
+                        driver_name=getattr(p, 'DriverName', "") or "",
+                        printer_type=ptype,
+                        status=status,
+                        status_code=self._safe_int(getattr(p, 'PrinterStatus', 0)),
+                        is_default=bool(getattr(p, 'Default', False)),
+                        is_shared=bool(getattr(p, 'Shared', False)),
+                        share_name=getattr(p, 'ShareName', None),
+                        location=getattr(p, 'Location', None),
+                        comment=getattr(p, 'Comment', None),
+                        device_id=getattr(p, 'DeviceID', None),
+                        manufacturer=manufacturer,
+                        is_color=bool(cap_desc and "Color" in str(cap_desc)),
+                        jobs_count=self._safe_int(getattr(p, 'Jobs', 0)),
+                        data_source="wmi",
+                        raw_wmi_data={
+                            'Attributes': getattr(p, 'Attributes', None),
+                            'Capabilities': getattr(p, 'Capabilities', None),
+                            'DetectedErrorState': getattr(p, 'DetectedErrorState', None),
+                            'ExtendedPrinterStatus': getattr(p, 'ExtendedPrinterStatus', None),
+                            'HorizontalResolution': getattr(p, 'HorizontalResolution', None),
+                            'VerticalResolution': getattr(p, 'VerticalResolution', None),
+                        }
+                    )
+
+                    printers.append(printer)
+                except Exception as e:
+                    logger.warning(f"WMI: Skipping printer '{getattr(p, 'Name', 'unknown')}': {e}")
+                    continue
             
             logger.debug(f"WMI: Found {len(printers)} printers")
             return printers
@@ -1279,33 +1295,37 @@ class WMIAgent:
                 query += f" WHERE Name LIKE '{printer_name},%'"
             
             for j in c.query(query):
-                status, _ = WindowsStatusParser.parse_job_status(j.StatusMask or 0)
+                status, _ = WindowsStatusParser.parse_job_status(
+                    self._safe_int(getattr(j, 'StatusMask', 0))
+                )
                 
                 # Parse submitted time
                 submitted = None
-                if j.TimeSubmitted:
+                time_submitted = getattr(j, 'TimeSubmitted', None)
+                if time_submitted:
                     try:
                         submitted = datetime.strptime(
-                            j.TimeSubmitted.split('.')[0], 
+                            time_submitted.split('.')[0], 
                             "%Y%m%d%H%M%S"
                         )
                     except:
                         pass
                 
+                j_name = getattr(j, 'Name', None)
                 job = PrintJob(
-                    job_id=j.JobId,
-                    printer_name=printer_name or j.Name.split(',')[0] if j.Name else "",
-                    document_name=j.Document or "",
-                    user_name=j.Owner or "",
+                    job_id=self._safe_int(getattr(j, 'JobId', 0)),
+                    printer_name=printer_name or (j_name.split(',')[0] if j_name else ""),
+                    document_name=getattr(j, 'Document', None) or "",
+                    user_name=getattr(j, 'Owner', None) or "",
                     status=status,
-                    status_code=j.StatusMask or 0,
-                    priority=j.Priority or 1,
-                    total_pages=j.TotalPages or 0,
-                    pages_printed=j.PagesPrinted or 0,
-                    size_bytes=j.Size or 0,
+                    status_code=self._safe_int(getattr(j, 'StatusMask', 0)),
+                    priority=self._safe_int(getattr(j, 'Priority', None), default=1),
+                    total_pages=self._safe_int(getattr(j, 'TotalPages', 0)),
+                    pages_printed=self._safe_int(getattr(j, 'PagesPrinted', 0)),
+                    size_bytes=self._safe_int(getattr(j, 'Size', 0)),
                     submitted=submitted,
-                    host_name=j.HostPrintQueue,
-                    data_type=j.DataType or "RAW",
+                    host_name=getattr(j, 'HostPrintQueue', None),
+                    data_type=getattr(j, 'DataType', None) or "RAW",
                     data_source="wmi"
                 )
                 jobs.append(job)
@@ -1329,19 +1349,19 @@ class WMIAgent:
             
             for p in c.Win32_PrinterConfiguration(Name=name):
                 return {
-                    'name': p.Name,
-                    'paper_size': p.PaperSize,
-                    'paper_length': p.PaperLength,
-                    'paper_width': p.PaperWidth,
-                    'scale': p.Scale,
-                    'copies': p.Copies,
-                    'color': p.Color,
-                    'duplex': p.Duplex,
-                    'orientation': p.Orientation,
-                    'print_quality': p.PrintQuality,
-                    'x_resolution': p.XResolution,
-                    'y_resolution': p.YResolution,
-                    'collate': p.Collate,
+                    'name': getattr(p, 'Name', None),
+                    'paper_size': getattr(p, 'PaperSize', None),
+                    'paper_length': getattr(p, 'PaperLength', None),
+                    'paper_width': getattr(p, 'PaperWidth', None),
+                    'scale': getattr(p, 'Scale', None),
+                    'copies': getattr(p, 'Copies', None),
+                    'color': getattr(p, 'Color', None),
+                    'duplex': getattr(p, 'Duplex', None),
+                    'orientation': getattr(p, 'Orientation', None),
+                    'print_quality': getattr(p, 'PrintQuality', None),
+                    'x_resolution': getattr(p, 'XResolution', None),
+                    'y_resolution': getattr(p, 'YResolution', None),
+                    'collate': getattr(p, 'Collate', None),
                 }
             
             return {}
@@ -1362,14 +1382,14 @@ class WMIAgent:
             
             for p in c.Win32_Process(Name="spoolsv.exe"):
                 return {
-                    'pid': p.ProcessId,
-                    'name': p.Name,
-                    'handle_count': p.HandleCount,
-                    'thread_count': p.ThreadCount,
-                    'working_set_mb': (p.WorkingSetSize or 0) / 1024 / 1024,
-                    'virtual_size_mb': (p.VirtualSize or 0) / 1024 / 1024,
-                    'command_line': p.CommandLine,
-                    'creation_date': p.CreationDate,
+                    'pid': getattr(p, 'ProcessId', None),
+                    'name': getattr(p, 'Name', None),
+                    'handle_count': self._safe_int(getattr(p, 'HandleCount', 0)),
+                    'thread_count': self._safe_int(getattr(p, 'ThreadCount', 0)),
+                    'working_set_mb': self._safe_int(getattr(p, 'WorkingSetSize', 0)) / 1024 / 1024,
+                    'virtual_size_mb': self._safe_int(getattr(p, 'VirtualSize', 0)) / 1024 / 1024,
+                    'command_line': getattr(p, 'CommandLine', None),
+                    'creation_date': getattr(p, 'CreationDate', None),
                 }
             
             return {}
