@@ -1,0 +1,50 @@
+email:
+  enabled: true
+  password: app-password
+  recipients:
+  - admin@firma.pl
+  - it@firma.pl
+  sender: alerts@firma.pl
+  smtp_port: 587
+  smtp_server: smtp.gmail.com
+local_printers:
+  enabled: true
+printers:
+- ip: 192.168.1.100
+  manufacturer: HP
+  name: HP LaserJet Biuro
+- ip: 192.168.1.101
+  manufacturer: Canon
+  name: Canon Recepcja
+- ip: 192.168.1.102
+  manufacturer: Xerox
+  name: Xerox Magazyn
+- ip: 192.168.1.123
+  manufacturer: xerox
+  name: vesalink c500
+scheduler:
+  debounce_count: 2
+  enabled: true
+  interval_minutes: 30
+slack:
+  enabled: true
+  webhook_url: https://hooks.slack.com/services/XXX/YYY/ZZZ
+snmp:
+  community: public
+  timeout: 3
+  version: 2c
+suppression:
+  night_window:
+    enabled: true
+    end_hour: 6
+    severity_threshold: error
+    start_hour: 22
+  weekend:
+    enabled: true
+    severity_threshold: critical
+teams:
+  enabled: false
+  webhook_url: ''
+thresholds:
+  toner_critical: 10
+  toner_low: 20
